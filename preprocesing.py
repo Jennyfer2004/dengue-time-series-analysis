@@ -1,7 +1,7 @@
 import pandas as pd
 import os 
 
-from calculando_voroni import main_v
+from calculando_voroni import generar_pesos_maestro
 from transformar_a_semanal import semanal 
 
 # ---  UTILIDADES DE LIMPIEZA ---
@@ -37,7 +37,7 @@ def load_data(ruta_clima,ruta_casos,ano):
 
 def procesar_clima_provincial(df_clima, geojson_path):
 
-    pesos_maestro = main_v(df_clima, gjson=geojson_path)
+    pesos_maestro = generar_pesos_maestro(df_clima, gjson='cuba.geojson')
     
     variables = ['Temperatura med', 'Humedad Relat', 'Precipitaciones']
     for var in variables:
