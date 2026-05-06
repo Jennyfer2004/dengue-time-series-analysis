@@ -10,344 +10,177 @@ import statsmodels.api as sm
 from sklearn.metrics import mean_absolute_error, mean_squared_error, mean_absolute_percentage_error
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
+import matplotlib
+matplotlib.use('Agg') 
 
-def cargar(nombre_provincia,carpeta_salida):
+
+
+def cargar_datos_provincia(nombre_provincia, carpeta_entrada):
     
-    nombre_archivo = f'{nombre_provincia.replace(" ", "_")}.csv'
-    ruta_completa = os.path.join(carpeta_salida, nombre_archivo)
-
+    nombre_archivo = f'{nombre_provincia}.csv'
+    ruta_completa = os.path.join(carpeta_entrada, nombre_archivo)
+    
+    if not os.path.exists(ruta_completa):
+        raise FileNotFoundError(f"No se encontró el archivo: {ruta_completa}")
+    
     df = pd.read_csv(ruta_completa)
+    
     return df
 
-def graficar(df,columna="Casos_Dengue"):
-    
-    # lags=110 para ver claramente lo que pasa en el periodo 52 y 104
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-    serie_diferenciada = df[columna].diff().dropna()
-    
-    # ACF: Ayuda a identificar q (MA) y Q (SMA)
-    plot_acf(serie_diferenciada, lags=110, ax=ax1)
-    ax1.set_title('Autocorrelación (ACF) - Buscamos q y Q')
+def obtener_hiperparametros(nombre_provincia, ruta_params):
+    if not os.path.exists(ruta_params):
+        return [0], [1], [0], [0], [0], [0] 
 
-    # PACF: Ayuda a identificar p (AR) y P (SAR)
-    plot_pacf(serie_diferenciada, lags=110, ax=ax2)
-    ax2.set_title('Autocorrelación Parcial (PACF) - Buscamos p y P')
-
-    plt.tight_layout()
-    plt.show()
-
-
-def obtener_parametros_provincia(nombre_provincia, ruta_parametros):
-    """
-    Busca en el CSV de parámetros la fila de la provincia y devuelve
-    listas para p, d, q, P, D, Q.
-    """
-    if not os.path.exists(ruta_parametros):
-        print(f"Error: No se encontró el archivo de parámetros en {ruta_parametros}")
-        return
-
-    df_params = pd.read_csv(ruta_parametros)
-    
+    df_params = pd.read_csv(ruta_params)
     fila = df_params[df_params['Provincia'].str.lower() == nombre_provincia.lower()]
     
     if fila.empty:
-        print(f"Advertencia: No hay parámetros definidos para {nombre_provincia}. Usando valores base.")
-        return 
+        return [0], [0], [1], [0], [0], [1]
+
+    def parse_lista(val):
+        s = str(val).strip()
+        return [int(x.strip()) for x in s.split(',')] if ',' in s else [int(float(s))]
+
+    return (parse_lista(fila['p'].iloc[0]), parse_lista(fila['q'].iloc[0]), 
+            parse_lista(fila['d'].iloc[0]), parse_lista(fila['P'].iloc[0]), 
+            parse_lista(fila['Q'].iloc[0]), parse_lista(fila['D'].iloc[0]))
     
-    def limpiar_a_lista(valor):
-        s = str(valor).strip()
-        if ',' in s:
-            return [int(x.strip()) for x in s.split(',') if x.strip() != ""]
-        else:
-            return [int(float(s))]
-
-    p = limpiar_a_lista(fila['p'].iloc[0])
-    d = limpiar_a_lista(fila['d'].iloc[0])
-    q = limpiar_a_lista(fila['q'].iloc[0])
-    P = limpiar_a_lista(fila['P'].iloc[0])
-    D = limpiar_a_lista(fila['D'].iloc[0])
-    Q = limpiar_a_lista(fila['Q'].iloc[0])
-
-    return p, q, d, P, Q, D
-
-def maunal_sarimax(df,exog_vars,nombre_provincia,carpeta,p,q,d,P,Q,D,s=52,columna="Casos_Dengue",n_forecast = 4):
-    archivo_cache = f"resultados_sarimax_{nombre_provincia}.csv"
-    ruta_completa = os.path.join(carpeta, archivo_cache)
-
-    pdq = list(itertools.product(p, d, q))
-    seasonal_pdq = [(x[0], x[1], x[2], s) for x in list(itertools.product(P, D, Q))]
-    y = df["Casos_Dengue"]
-     
-    train_y = y[:-n_forecast]
-    train_exog = exog_vars[:-n_forecast]
-    test_y = y[-n_forecast:]
-    test_exog = exog_vars[-n_forecast:]
-
-
-    if os.path.exists(ruta_completa):
-        resultados_df = pd.read_csv(ruta_completa)
-        print(f"Cargado caché con {len(resultados_df)} combinaciones previas.")
-    else:
-        resultados_df = pd.DataFrame(columns=["param", "seasonal", "aic"])
-
-    if not resultados_df.empty:
-        
-        mejor_aic = resultados_df["aic"].min()
-        indice_mejor = resultados_df["aic"].idxmin()
-        mejor_fila = resultados_df.loc[indice_mejor]
-        
-        mejor_aic = mejor_fila["aic"]
-        mejores_params = (eval(mejor_fila["param"]), eval(mejor_fila["seasonal"]))
-        
-        print(f"Empezando con el mejor modelo previo: {mejores_params} (AIC: {mejor_aic})")
-    else:
-        mejor_aic = float("inf")
-        mejores_params = None
-        
     
+def buscar_mejor_sarima(train_y, train_exog, p_list, d_list, q_list, P_list, D_list, Q_list, s, ruta_cache):
+    
+    pdq = list(itertools.product(p_list, d_list, q_list))
+    seasonal_pdq = [(x[0], x[1], x[2], s) for x in list(itertools.product(P_list, D_list, Q_list))]
+    
+    if os.path.exists(ruta_cache):
+        res_df = pd.read_csv(ruta_cache)
+        print(len(res_df),ruta_cache)
+    else:
+        print(ruta_cache)
+        res_df = pd.DataFrame(columns=["param", "seasonal", "aic"])
+
+    mejor_aic = res_df["aic"].min() if not res_df.empty else float("inf")
+    mejor_cfg = None
+
     for param in pdq:
-        for param_seasonal in seasonal_pdq:
-            
-            ya_calculado = resultados_df[
-                (resultados_df['param'] == str(param)) & 
-                (resultados_df['seasonal'] == str(param_seasonal))
-            ]
-            
-            if not ya_calculado.empty:
+        for s_param in seasonal_pdq:
+
+            if not res_df.empty and ((res_df['param'] == str(param)) & (res_df['seasonal'] == str(s_param))).any():
                 continue
-            
+            print(param,s_param)
             try:
-                mod = sm.tsa.statespace.SARIMAX(train_y,
-                                                exog=train_exog,
-                                                order=param,
-                                                seasonal_order=param_seasonal,
-                                                enforce_stationarity=False,
-                                                enforce_invertibility=False)
+                mod = SARIMAX(train_y, exog=train_exog, order=param, seasonal_order=s_param,
+                              enforce_stationarity=False, enforce_invertibility=False)
                 results = mod.fit(disp=False)
-                print(param,param_seasonal,results.aic)
                 
-                nuevo_resultado = pd.DataFrame({
-                    "param": [str(param)], 
-                    "seasonal": [str(param_seasonal)], 
-                    "aic": [results.aic]
-                })
+                nuevo = pd.DataFrame({"param": [str(param)], "seasonal": [str(s_param)], "aic": [results.aic]})
+                nuevo.to_csv(ruta_cache, mode='a', header=not os.path.exists(ruta_cache), index=False)
                 
-                # Escribir al archivo (si no existe pone cabecera, si existe solo añade fila)
-                nuevo_resultado.to_csv(ruta_completa, mode='a', 
-                                       header=not os.path.exists(ruta_completa), 
-                                       index=False)
-                
-                # Actualizar el DataFrame en memoria para evitar repetir en esta misma sesión
-                resultados_df = pd.concat([resultados_df, nuevo_resultado], ignore_index=True)                
                 if results.aic < mejor_aic:
                     mejor_aic = results.aic
-                    mejores_params = (param, param_seasonal)
-                    
+                    mejor_cfg = (param, s_param)
             except:
                 continue
 
-    print(f"Mejor SARIMA: {mejores_params} con AIC: {mejor_aic}")
+    if mejor_cfg is None and not res_df.empty:
+        idx = res_df["aic"].idxmin()
+        mejor_cfg = (eval(res_df.loc[idx, "param"]), eval(res_df.loc[idx, "seasonal"]))
+        
+    return mejor_cfg
+import csv
 
-    best_order, best_seasonal_order = mejores_params
-
-    model_final = SARIMAX(train_y, 
-                          exog=train_exog, 
-                          order=best_order,
-                          seasonal_order=best_seasonal_order,
-                          enforce_stationarity=False,
-                          enforce_invertibility=False)
-    results_final = model_final.fit(disp=False)
-
-    forecast = results_final.get_forecast(steps=n_forecast, exog=test_exog)
-    forecast_df = forecast.summary_frame()
-    forecast_df.index = test_y.index
-
-    forecast_df['mean'] = np.clip(forecast_df['mean'], 0, None)
-    # forecast_df['mean_ci_lower'] = np.clip(forecast_df['mean_ci_lower'], 0, None)
-    # forecast_df['mean_ci_upper'] = np.clip(forecast_df['mean_ci_upper'], 0, None)
-
-    plt.figure(figsize=(12, 6))
-
-    plt.plot(y.index[-30:], y[-30:], label='Datos Reales', color='black', linewidth=2)
-
-    plt.plot(test_y.index, forecast_df['mean'], label='Predicción', color='red')
-
-    plt.fill_between(forecast_df.index, 
-                    forecast_df['mean_ci_lower'], 
-                    forecast_df['mean_ci_upper'], 
-                    color='pink', alpha=0.3, label='Intervalo de Confianza 95%')
-
-    plt.gcf().autofmt_xdate() 
-
-    plt.title('Predicción de Casos de Dengue - Serie Temporal Real')
-    plt.xlabel('Fecha (Semanas)')
-    plt.ylabel('Número de Casos')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.axhline(0, color='black', linewidth=1, alpha=0.5) # Línea en el cero
-    plt.show()
-    y_true = test_y
-    y_pred = forecast_df['mean']
+def guardar_metricas(y_true, y_pred, nombre_provincia, exog,parametros, ruta_archivo):
 
     mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    rmse = np.sqrt(mse)
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
     mape = mean_absolute_percentage_error(y_true, y_pred)
-
-    print(f"Error Absoluto Medio (MAE): {mae:.2f} casos")
-    print(f"Raíz del Error Cuadrático Medio (RMSE): {rmse:.2f} casos")
-    print(f"Error Porcentual Absoluto Medio (MAPE): {mape*100:.2f}%")
-
-    error_semanal = y_true - y_pred
-
-    plt.figure(figsize=(14, 6))
-    plt.plot(error_semanal.index, error_semanal, color='gray', label='Error (Real - Predicho)')
-    plt.axhline(0, color='black', linestyle='--', linewidth=1.5)
-    plt.title('Error de Predicción por Semana (Residuales)')
-    plt.xlabel('Semana')
-    plt.ylabel('Número de Casos de Error')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.gcf().autofmt_xdate()
-    plt.show()
     
-    return model_final
+    tiene_exog = False
+    if isinstance(exog, bool):
+        tiene_exog = exog
+    elif exog is not None:
+        tiene_exog = not exog.empty if hasattr(exog, 'empty') else True
 
-def maunal_sarima(df,nombre_provincia,carpeta,p,q,d,P,Q,D,s=52,columna="Casos_Dengue",n_forecast = 4):
-    archivo_cache = f"resultados_sarimax_{nombre_provincia}.csv"
-    ruta_completa = os.path.join(carpeta, archivo_cache)
+    modelo_nombre = "SARIMAX" if tiene_exog else "SARIMA"
 
-    pdq = list(itertools.product(p, d, q))
-    seasonal_pdq = [(x[0], x[1], x[2], s) for x in list(itertools.product(P, D, Q))]
-    y = df["Casos_Dengue"]
-     
-    train_y = y[:-n_forecast]
-    test_y = y[-n_forecast:]
+    datos_fila = {
+        "Provincia": nombre_provincia,
+        "Modelo": modelo_nombre,
+        "MAE": round(mae, 2),
+        "RMSE": round(rmse, 2),
+        "MAPE": f"{round(mape * 100, 2)}%",
+        "Parametros": parametros
+    }
 
+    os.makedirs(os.path.dirname(ruta_archivo), exist_ok=True)
+    file_exists = os.path.isfile(ruta_archivo)
 
-    if os.path.exists(ruta_completa):
-        resultados_df = pd.read_csv(ruta_completa)
-        print(f"Cargado caché con {len(resultados_df)} combinaciones previas.")
-    else:
-        resultados_df = pd.DataFrame(columns=["param", "seasonal", "aic"])
-
-    if not resultados_df.empty:
+    with open(ruta_archivo, mode='a', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=datos_fila.keys())
         
-        mejor_aic = resultados_df["aic"].min()
-        indice_mejor = resultados_df["aic"].idxmin()
-        mejor_fila = resultados_df.loc[indice_mejor]
-        
-        mejor_aic = mejor_fila["aic"]
-        mejores_params = (eval(mejor_fila["param"]), eval(mejor_fila["seasonal"]))
-        
-        print(f"Empezando con el mejor modelo previo: {mejores_params} (AIC: {mejor_aic})")
-    else:
-        mejor_aic = float("inf")
-        mejores_params = None
-        
+        if not file_exists:
+            writer.writeheader()
+            
+        writer.writerow(datos_fila)
+
+    print(f"\nMétricas guardadas para {nombre_provincia} ({modelo_nombre}):")
+    print(f"- MAE: {mae:.2f} | RMSE: {rmse:.2f} | MAPE: {mape*100:.2f}%")
     
-    for param in pdq:
-        for param_seasonal in seasonal_pdq:
-            
-            ya_calculado = resultados_df[
-                (resultados_df['param'] == str(param)) & 
-                (resultados_df['seasonal'] == str(param_seasonal))
-            ]
-            
-            if not ya_calculado.empty:
-                continue
-            
-            try:
-                mod = sm.tsa.statespace.SARIMAX(train_y,
-                                                order=param,
-                                                seasonal_order=param_seasonal,
-                                                enforce_stationarity=False,
-                                                enforce_invertibility=False)
-                results = mod.fit(disp=False)
-                print(param,param_seasonal,results.aic)
-                
-                nuevo_resultado = pd.DataFrame({
-                    "param": [str(param)], 
-                    "seasonal": [str(param_seasonal)], 
-                    "aic": [results.aic]
-                })
-                
-                # Escribir al archivo (si no existe pone cabecera, si existe solo añade fila)
-                nuevo_resultado.to_csv(ruta_completa, mode='a', 
-                                       header=not os.path.exists(ruta_completa), 
-                                       index=False)
-                
-                # Actualizar el DataFrame en memoria para evitar repetir en esta misma sesión
-                resultados_df = pd.concat([resultados_df, nuevo_resultado], ignore_index=True)                
-                if results.aic < mejor_aic:
-                    mejor_aic = results.aic
-                    mejores_params = (param, param_seasonal)
-                    
-            except:
-                continue
+    return datos_fila
 
-    print(f"Mejor SARIMA: {mejores_params} con AIC: {mejor_aic}")
+# def guardar_metricas(y_true, y_pred, nombre_provincia):
+#     mae = mean_absolute_error(y_true, y_pred)
+#     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+#     mape = mean_absolute_percentage_error(y_true, y_pred)
+    
+#     print(f"\nMétricas para {nombre_provincia}:")
+#     print(f"- MAE: {mae:.2f}\n- RMSE: {rmse:.2f}\n- MAPE: {mape*100:.2f}%")
+#     return {"MAE": mae, "RMSE": rmse, "MAPE": mape}
 
-    best_order, best_seasonal_order = mejores_params
-
-    model_final = SARIMAX(train_y, 
-                          order=best_order,
-                          seasonal_order=best_seasonal_order,
-                          enforce_stationarity=False,
-                          enforce_invertibility=False)
-    results_final = model_final.fit(disp=False)
-
-    forecast = results_final.get_forecast(steps=n_forecast)
-    forecast_df = forecast.summary_frame()
-    forecast_df.index = test_y.index
-
-    forecast_df['mean'] = np.clip(forecast_df['mean'], 0, None)
-    # forecast_df['mean_ci_lower'] = np.clip(forecast_df['mean_ci_lower'], 0, None)
-    # forecast_df['mean_ci_upper'] = np.clip(forecast_df['mean_ci_upper'], 0, None)
-
+def generar_y_guardar_graficos(y_all, test_y, forecast_df, errores, prov, carpeta_out):
+    
+    os.makedirs(carpeta_out, exist_ok=True)
+    
     plt.figure(figsize=(12, 6))
-
-    plt.plot(y.index[-30:], y[-30:], label='Datos Reales', color='black', linewidth=2)
-
+    plt.plot(y_all.index[-30:], y_all[-30:], label='Real', color='black', linewidth=2)
     plt.plot(test_y.index, forecast_df['mean'], label='Predicción', color='red')
-
-    plt.fill_between(forecast_df.index, 
-                    forecast_df['mean_ci_lower'], 
-                    forecast_df['mean_ci_upper'], 
-                    color='pink', alpha=0.3, label='Intervalo de Confianza 95%')
-
-    plt.gcf().autofmt_xdate() 
-
-    plt.title('Predicción de Casos de Dengue - Serie Temporal Real')
-    plt.xlabel('Fecha (Semanas)')
-    plt.ylabel('Número de Casos')
+    plt.fill_between(test_y.index, forecast_df['mean_ci_lower'], forecast_df['mean_ci_upper'], color='pink', alpha=0.3)
+    plt.title(f'SARIMAX: Predicción {prov}')
     plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.axhline(0, color='black', linewidth=1, alpha=0.5) # Línea en el cero
-    plt.show()
-    y_true = test_y
-    y_pred = forecast_df['mean']
+    plt.savefig(os.path.join(carpeta_out, f'prediccion_{prov}.png'))
+    plt.close()
 
-    mae = mean_absolute_error(y_true, y_pred)
-    mse = mean_squared_error(y_true, y_pred)
-    rmse = np.sqrt(mse)
-    mape = mean_absolute_percentage_error(y_true, y_pred)
+    plt.figure(figsize=(12, 5))
+    plt.plot(test_y.index, errores, color='gray', label='Error')
+    plt.axhline(0, color='black', linestyle='--')
+    plt.title(f'Residuales: {prov}')
+    plt.savefig(os.path.join(carpeta_out, f'residuales_{prov}.png'))
+    plt.close()
 
-    print(f"Error Absoluto Medio (MAE): {mae:.2f} casos")
-    print(f"Raíz del Error Cuadrático Medio (RMSE): {rmse:.2f} casos")
-    print(f"Error Porcentual Absoluto Medio (MAPE): {mape*100:.2f}%")
+def ejecutar_workflow_sarimax(df, prov, folder_out, params_csv, s=52, n_forecast=4, columna="Casos", usar_exog=True,ruta_archivo="resultados/metricas_globales.csv"):
 
-    error_semanal = y_true - y_pred
-
-    plt.figure(figsize=(14, 6))
-    plt.plot(error_semanal.index, error_semanal, color='gray', label='Error (Real - Predicho)')
-    plt.axhline(0, color='black', linestyle='--', linewidth=1.5)
-    plt.title('Error de Predicción por Semana (Residuales)')
-    plt.xlabel('Semana')
-    plt.ylabel('Número de Casos de Error')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    plt.gcf().autofmt_xdate()
-    plt.show()
+    os.makedirs(folder_out, exist_ok=True)
+    ruta_cache = os.path.join(folder_out, f"cache_{prov}.csv")
     
-    return model_final
+    exog_cols = [c for c in df.columns if c not in [columna, 'Fecha', 'Provincias', 'Unnamed: 0']]
+    exog_data = df[exog_cols] if usar_exog else None
+
+    y = df[columna]
+    train_y, test_y = y[:-n_forecast], y[-n_forecast:]
+    train_ex = exog_data[:-n_forecast] if usar_exog else None
+    test_ex = exog_data[-n_forecast:] if usar_exog else None
+
+    p, q, d, P, Q, D = obtener_hiperparametros(prov, params_csv)
+    
+    best_order, best_seasonal = buscar_mejor_sarima(train_y, train_ex, p, d, q, P, D, Q, s, ruta_cache)
+    
+    model = SARIMAX(train_y, exog=train_ex, order=best_order, seasonal_order=best_seasonal,
+                    enforce_stationarity=False, enforce_invertibility=False).fit(disp=False)
+    
+    forecast = model.get_forecast(steps=n_forecast, exog=test_ex)
+    f_df = forecast.summary_frame()
+    f_df['mean'] = np.clip(f_df['mean'], 0, None)
+    
+    guardar_metricas(test_y, f_df['mean'], prov,usar_exog,[best_order, best_seasonal],ruta_archivo)
+    generar_y_guardar_graficos(y, test_y, f_df, test_y - f_df['mean'], prov, folder_out)
+    
+    return model
