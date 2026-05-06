@@ -121,13 +121,13 @@ def guardar_datasets_con_lags(df, lags_ccf, lags_acf, carpeta_base):
             for lag in lista_lags:
                 df_c[f'{var}_lag{lag}'] = df_p[var].shift(lag)
         
-        # df_c.dropna().to_csv(os.path.join(ruta_clima, f'{prov}_lags.csv'), index=False)
+        df_c.dropna().to_csv(os.path.join(ruta_clima, f'{prov}.csv'), index=False)
 
         df_a = df_p.copy()
         for lag in lags_acf[prov]:
             df_a[f'Casos_lag{lag}'] = df_p['Casos'].shift(lag)
             
-        df_a.dropna().to_csv(os.path.join(ruta_casos, f'{prov}_acf.csv'), index=False)
+        df_a.dropna().to_csv(os.path.join(ruta_casos, f'{prov}.csv'), index=False)
 
 # --- FUNCIÓN MAESTRA ---
 def ejecutar_analisis_lags(df, folder_output='outputs'):
