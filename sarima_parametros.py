@@ -127,14 +127,6 @@ def guardar_metricas(y_true, y_pred, nombre_provincia, exog,parametros, ruta_arc
     
     return datos_fila
 
-# def guardar_metricas(y_true, y_pred, nombre_provincia):
-#     mae = mean_absolute_error(y_true, y_pred)
-#     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-#     mape = mean_absolute_percentage_error(y_true, y_pred)
-    
-#     print(f"\nMétricas para {nombre_provincia}:")
-#     print(f"- MAE: {mae:.2f}\n- RMSE: {rmse:.2f}\n- MAPE: {mape*100:.2f}%")
-#     return {"MAE": mae, "RMSE": rmse, "MAPE": mape}
 
 def generar_y_guardar_graficos(y_all, test_y, forecast_df, errores, prov, carpeta_out):
     
