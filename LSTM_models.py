@@ -5,139 +5,210 @@ from tensorflow.keras import Model
 
 import pandas as pd
 import numpy as np
+import csv
 import os
-
+import matplotlib
 import matplotlib.pyplot as plt
+matplotlib.use('Agg') 
+
+from statsmodels.tsa.stattools import acf
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error
+
+
+def preparar_datos_dl(nombre_provincia, carpeta_salida, n_forecast, n_past, cols_a_excluir):
+    ruta = os.path.join(carpeta_salida, f'{nombre_provincia}.csv')
+    if not os.path.exists(ruta):
+        raise FileNotFoundError(f"No se encontró el archivo: {ruta}")
+    
+    df = pd.read_csv(ruta)
+    # Seleccionar solo columnas numéricas útiles
+    df_num = df.drop(cols_a_excluir, axis=1, errors='ignore')
+    
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    data_scaled = scaler.fit_transform(df_num.values)
+
+    X, y = [], []
+    for i in range(n_past, len(data_scaled) - n_forecast + 1):
+        X.append(data_scaled[i - n_past:i, :])
+        y.append(data_scaled[i : i + n_forecast, 0]) # La columna 0 debe ser 'Casos'
+    
+    X, y = np.array(X), np.array(y)
+
+    # Split: últimos 'n_forecast' para test
+    X_train, X_test = X[:-1], X[-1:] # Tomamos la última secuencia disponible para predecir el futuro
+    y_train, y_test = y[:-1], y[-1:]
+    
+    return X_train, X_test, y_train, y_test, scaler, df_num.shape[1]
 
 def build_lstm_model(model_type, input_shape):
     """
     Tipos: 'stacked', 'bidirectional', 'attention'
     """
+    
     inputs = Input(shape=input_shape)
 
     if model_type == 'stacked':
+        
         x = LSTM(64, return_sequences=True, activation='relu')(inputs)
         x = Dropout(0.2)(x)
+        
         x = LSTM(32, activation='relu')(x)
         x = Dropout(0.2)(x)
 
     elif model_type == 'bidirectional':
+        
         x = Bidirectional(LSTM(64, return_sequences=True, activation='relu'))(inputs)
         x = Dropout(0.2)(x)
+        
         x = Bidirectional(LSTM(32, activation='relu'))(x)
         x = Dropout(0.2)(x)
 
     elif model_type == 'attention':
+        
         # Capa LSTM que devuelve secuencias para que la Atención pueda "mirar" atrás
         lstm_out = LSTM(64, return_sequences=True, activation='relu')(inputs)
+        
         # Mecanismo de Atención simplificado (Self-Attention)
         query = Dense(64)(lstm_out)
         value = Dense(64)(lstm_out)
+        
         attention_layer = Attention()([query, value])
-        # Reducimos a un vector global (Global Average Pooling o similar)
+        
+        # Reducimos a un vector global
         x = tf.keras.layers.GlobalAveragePooling1D()(attention_layer)
         x = Dense(32, activation='relu')(x)
 
     outputs = Dense(1)(x)
+    
     model = Model(inputs=inputs, outputs=outputs)
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
+    
     return model
 
-def create_sequences_multi(data, n_past, n_future):
-        X, y = [], []
-        for i in range(n_past, len(data) - n_future + 1):
-            X.append(data[i - n_past:i, :])
-            # Aquí guardamos un vector de 4 valores (semanas 1 a 4)
-            y.append(data[i : i + n_future, 0])
-        return np.array(X), np.array(y)
+def desescalar_predicciones(preds, y_true, scaler, n_features):
+    """
+    Corrección: Invierte el escalado iterando sobre el eje del TIEMPO (pasos futuros),
+    no sobre las features, para mantener la forma (n_muestras, n_pasos_futuros).
+    """
     
-def load(nombre_provincia,carpeta_salida, n_forecast):
+    n_samples = preds.shape[0]
+    n_steps = preds.shape[1] 
     
-    nombre_archivo = f'{nombre_provincia.replace(" ", "_")}.csv'
-    ruta_completa = os.path.join(carpeta_salida, nombre_archivo)
+    preds_inv = np.zeros((n_samples, n_steps))
+    y_true_inv = np.zeros((n_samples, n_steps))
 
-    df= pd.read_csv(ruta_completa)
+    dummy = np.zeros((n_samples, n_features))
 
-    df= df.drop(['Unnamed: 0', "Provincias"], axis=1)
-    print(df.columns)
+    for i in range(n_steps):
+
+        dummy[:, 0] = preds[:, i]
+
+        transformed = scaler.inverse_transform(dummy)
+        preds_inv[:, i] = transformed[:, 0]
+
+        dummy[:, 0] = y_true[:, i]
+        transformed_true = scaler.inverse_transform(dummy)
+        y_true_inv[:, i] = transformed_true[:, 0]
+
+    return preds_inv, y_true_inv
 
 
-    features = [
-        'Casos_Dengue',"Precipitaciones","Temperatura med",'Humedad Relat', 'Temperatura med_lag17', 'Mes',"Semana Estadística"
-    ]
-
-    data_selected = df[features].values
-
-    scaler = MinMaxScaler(feature_range=(0, 1))
-    data_scaled = scaler.fit_transform(data_selected)
-
-    X, y = create_sequences_multi(data_scaled, n_past=8, n_future=n_forecast)
-
-    y_train = y[:-n_forecast]
-    X_train= X[:-n_forecast]
-    y_test = y[-n_forecast:]
-    X_test = X[-n_forecast:]
-    return(data_scaled,X_train,y_train,X_test,y_test)
+def guardar_metricas_dl(y_true, y_pred, prov, modelo, ruta="resultados/metricas_globales.csv"):
     
-def main( nombre_provincia, carpeta_salida, n_forecast = 4):
-    
-    scaler = MinMaxScaler(feature_range=(0, 1))
+    mae = mean_absolute_error(y_true.flatten(), y_pred.flatten())
+    rmse = np.sqrt(mean_squared_error(y_true.flatten(), y_pred.flatten()))
+    mape = mean_absolute_percentage_error(y_true.flatten(), y_pred.flatten())
 
-    data_scaled,X_train,y_train,X_test,y_test=load( nombre_provincia, carpeta_salida, n_forecast = 4)
-   
+    datos_fila = {
+        "Provincia": prov,
+        "Modelo": f"DL_{modelo}",
+        "MAE": round(mae, 2),
+        "RMSE": round(rmse, 2),
+        "MAPE": f"{round(mape * 100, 2)}%",
+        "Parametros": "N_past:8, Epochs:100, EarlyStop"
+    }
+
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    file_exists = os.path.isfile(ruta)
+    
+    with open(ruta, mode='a', newline='', encoding='utf-8') as f:
+        
+        writer = csv.DictWriter(f, fieldnames=datos_fila.keys())
+        
+        if not file_exists: writer.writeheader()
+        writer.writerow(datos_fila)
+    
+    return mae
+
+
+def ejecutar_dl_workflow(nombre_provincia, carpeta_entrada, n_forecast=4, n_past=8, cols_excluir=["Provincias", "Fecha", "Año", "Semana Estadística"]):
+    
     architectures = ['stacked', 'bidirectional', 'attention']
-    results = {}
+    
+    X_train, X_test, y_train, y_test, scaler, n_feats = preparar_datos_dl(
+        nombre_provincia, carpeta_entrada, n_forecast, n_past, cols_excluir
+    )
+    
+    df = pd.read_csv(os.path.join(carpeta_entrada, f'{nombre_provincia}.csv'))
+    df_num = df.drop(cols_excluir, axis=1, errors='ignore')
+
+    data_scaled = scaler.transform(df_num.values)
+
+    best_mae = float('inf')
+    best_arch = None
+    final_preds_plot = None
+    final_reales_plot = None
 
     for arch in architectures:
-        print(f"\n--- Entrenando Modelo: {arch.upper()} ---")
-
+        print(f"Entrenando {arch}...")
+        
         model = build_lstm_model(arch, (X_train.shape[1], X_train.shape[2]))
-
-        # Entrenar con Early Stopping para evitar Overfitting
         early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 
-        history = model.fit(
-            X_train, y_train,
-            epochs=100,
-            batch_size=32,
-            validation_split=0.2,
-            callbacks=[early_stop],
-            verbose=0 # Para no llenar la consola
-        )
+        model.fit(X_train, y_train, epochs=100, batch_size=32, validation_split=0.2, 
+                  callbacks=[early_stop], verbose=0)
 
-        loss, mae = model.evaluate(X_test, y_test, verbose=0)
-        results[arch] = {'MAE': mae, 'History': history}
-        print(f"Resultado {arch}: MAE = {mae:.4f}")
+        last_sequence = X_test[-1].copy() # Forma (8, n_features)
+        current_preds_scaled = []
+        
+        for step in range(n_forecast):
 
-        mejor_tipo = min(results, key=lambda k: results[k]['MAE'])
-        print(f"\n🏆 Mejor Modelo Detectado: {mejor_tipo.upper()}")
+            input_seq = last_sequence.reshape(1, n_past, n_feats)
+            
+            next_pred_scaled = model.predict(input_seq, verbose=0)
+            current_preds_scaled.append(next_pred_scaled[0, 0])
+            
+            last_sequence = np.roll(last_sequence, -1, axis=0)
+            
+            last_sequence[-1, 0] = next_pred_scaled[0, 0]
+            
+        current_preds_scaled = np.array(current_preds_scaled).reshape(1, -1)
+        
+        dummy_preds = np.zeros((n_forecast, n_feats))
+        dummy_preds[:, 0] = current_preds_scaled.flatten()
+        p_reales = scaler.inverse_transform(dummy_preds)[:, 0]
+        
+        dummy_reales = np.zeros((n_forecast, n_feats))
+        dummy_reales[:, 0] = y_test[-1] 
+        y_reales = scaler.inverse_transform(dummy_reales)[:, 0]
 
-        preds_escaladas = model.predict(X_test)
+        current_mae = guardar_metricas_dl(y_reales, p_reales, nombre_provincia, arch)
 
-        dummy_preds = np.zeros((len(preds_escaladas), data_scaled.shape[1]))
+        if current_mae < best_mae:
+            best_mae = current_mae
+            best_arch = arch
+            final_preds_plot = p_reales
+            final_reales_plot = y_reales
 
-        dummy_preds[:, 0] = preds_escaladas[:, 0]
-        preds_reales = scaler.inverse_transform(dummy_preds)[:, 0]
-
-        dummy_test = np.zeros((len(y_test), data_scaled.shape[1]))
-        dummy_test[:, 0] = y_test[:, 0]
-        y_test_original = scaler.inverse_transform(dummy_test)[:, 0]
-
-        print(f"--- Métricas en Unidades Reales (Casos) ---")
-        print(f"MAE Real: {mean_absolute_error(y_test_original, preds_reales):.2f} casos")
-        print(f"RMSE Real: {np.sqrt(mean_squared_error(y_test_original, preds_reales)):.2f}")
-        print(f"MAPE Real: {mean_absolute_percentage_error(y_test_original, preds_reales)*100:.2f}%")
-
-        plt.figure(figsize=(12, 6))
-        plt.plot(y_test_original, label="Casos Reales", color='#1f77b4', linewidth=2, marker='o', markersize=4)
-        plt.plot(preds_reales, label=f"Predicción ({mejor_tipo})", color='#d62728', linestyle='--', linewidth=2)
-
-        plt.title(f"Evaluación de Predicción de Dengue: {mejor_tipo.capitalize()}", fontsize=14)
-        plt.xlabel("Semanas de Test", fontsize=12)
-        plt.ylabel("Número de Casos", fontsize=12)
+    if final_preds_plot is not None:
+        plt.figure(figsize=(10, 5))
+        plt.plot(final_reales_plot, label="Real", marker='o', color='black')
+        plt.plot(final_preds_plot, label=f"Pred ({best_arch})", linestyle='--', color='red')
+        plt.title(f"Mejor Modelo DL: {best_arch} - {nombre_provincia}")
         plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.show()
+        plt.savefig(f"resultados/graficos_dl_{nombre_provincia}.png")
+        plt.close()
+        print(f"✅ Finalizado {nombre_provincia}. Mejor Arquitectura: {best_arch}")
+
