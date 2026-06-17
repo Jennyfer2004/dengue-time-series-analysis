@@ -8,12 +8,8 @@ from scipy.stats import pearsonr
 import matplotlib
 matplotlib.use('Agg') 
 
-# --- MOTOR ESTADÍSTICO ---
 def calcular_ccf_validado(serie_y, serie_x, max_lag=26, alpha=0.05):
-    """
-    Motor principal para encontrar lags significativos usando diferenciación
-    para asegurar estacionariedad y validación p-value.
-    """
+    """Encuntra lags significativos usando diferenciación y validación p-value. """
     dy = serie_y.diff().dropna()
     dx = serie_x.diff().dropna()
     
@@ -43,14 +39,15 @@ def calcular_ccf_validado(serie_y, serie_x, max_lag=26, alpha=0.05):
 
 def calcular_acf_validado(serie, max_lag=20, alpha=0.05):
     """Identifica la influencia del pasado de la propia serie (Autocorrelación)."""
+    
     dy = serie.diff().dropna()
 
     return calcular_ccf_validado(dy, dy, max_lag, alpha)
 
 
-# --- VISUALIZACIÓN --
 def exportar_grafico_ccf(serie1, serie2, nombre1, nombre2, output_dir, max_lag=26):
     """Genera y guarda el gráfico de bastones de la CCF."""
+    
     df_temp = pd.DataFrame({nombre1: serie1, nombre2: serie2}).dropna()
     ccf_values = ccf(df_temp[nombre2], df_temp[nombre1], adjusted=False)[:max_lag+1]
     lags = np.arange(len(ccf_values))
@@ -73,9 +70,10 @@ def exportar_grafico_ccf(serie1, serie2, nombre1, nombre2, output_dir, max_lag=2
     plt.savefig(os.path.join(output_dir, f'CCF_{nombre2}.png'))
     plt.close()
 
-# --- GESTIÓN DE DATOS Y ARCHIVOS ---
+
 def generar_reporte_lags(df, provincias, variables_clima, ruta_csv):
     """Calcula todos los lags y genera el archivo CSV de resumen."""
+    
     lags_ccf_master = {}
     lags_acf_master = {}
     
@@ -129,8 +127,7 @@ def guardar_datasets_con_lags(df, lags_ccf, lags_acf, carpeta_base):
             
         df_a.dropna().to_csv(os.path.join(ruta_casos, f'{prov}.csv'), index=False)
 
-# --- FUNCIÓN MAESTRA ---
-def ejecutar_analisis_lags(df, folder_output='outputs'):
+def ejecutar_analisis_lags(df, folder_output='outputs/tables'):
     """Orquestador de todo el análisis de retardos."""
    
     provincias = df['Provincias'].unique()
@@ -140,17 +137,9 @@ def ejecutar_analisis_lags(df, folder_output='outputs'):
         df_p = df[df['Provincias'] == prov].sort_index()
 
         for var in variables:
-            exportar_grafico_ccf(
-                df_p['Casos'].diff().dropna(), 
-                df_p[var].diff().dropna(), 
-                'Casos', var, 
-                os.path.join(folder_output, 'graficos', prov)
-            )
+            exportar_grafico_ccf( df_p['Casos'].diff().dropna(), df_p[var].diff().dropna(), 'Casos', var, os.path.join(folder_output, 'graficos', prov))
 
-    lags_ccf, lags_acf = generar_reporte_lags(
-        df, provincias, variables, 
-        os.path.join(folder_output, 'resumen_lags.csv')
-    )
+    lags_ccf, lags_acf = generar_reporte_lags(df, provincias, variables, os.path.join(folder_output, 'resumen_lags.csv'))
     
     guardar_datasets_con_lags(df, lags_ccf, lags_acf, folder_output)
     

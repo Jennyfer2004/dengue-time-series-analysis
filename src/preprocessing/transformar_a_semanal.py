@@ -3,6 +3,7 @@ import numpy as np
 
 def preparar_fecha(df_provincial):
     """Prepara la columna de fecha a partir de Año y Mes"""
+    
     df = df_provincial.copy()
     df['Fecha'] = pd.to_datetime(df[['Año', 'Mes']].rename(columns={'Año': 'year', 'Mes': 'month'}) .assign(day=1) )
     
@@ -31,7 +32,7 @@ def distribuir_precipitacion_mensual(df_semanal):
     return df_semanal.drop(columns=['Año_temp', 'Mes_temp'])
 
 def transformar_provincia_a_semanal(group):
-    """Transforma datos diarios/mensuales de una provincia a frecuencia semanal"""
+    """Transforma datos mensuales de una provincia a frecuencia semanal"""
 
     semanal = group.resample('W-MON').agg({
         'Temp_Med': 'mean',
@@ -54,9 +55,7 @@ def agregar_año_mes(df_semanal_final):
     return df_semanal_final
 
 def semanal(df_provincial):
-    """
-    Función principal que orquesta la transformación a datos semanales.
-    """
+    """Función principal que orquesta la transformación a datos semanales."""
 
     df_preparado = preparar_fecha(df_provincial)
     

@@ -7,6 +7,7 @@ import numpy as np
 
 def normalizar_texto(texto):
     """Limpia y estandariza cadenas de texto."""
+    
     if not texto: return ""
     return unicodedata.normalize('NFKD', str(texto)).encode('ascii', 'ignore').decode('utf-8').lower().strip()
 
@@ -21,6 +22,7 @@ def cargar_datos(df_clima, gjson_path='cuba.geojson'):
 
 def ajustar_puntos_a_poligono(gdf_puntos, poligono):
     """Asegura que todos los puntos estén dentro del polígono (ajusta a la costa si no)."""
+    
     puntos_ajustados = []
     
     for p in gdf_puntos.geometry:
@@ -35,6 +37,8 @@ def ajustar_puntos_a_poligono(gdf_puntos, poligono):
 
 
 def calcular_pesos_voronoi(gdf_estaciones, prov_shape):
+    """Calcula los pesos de cada estacion"""
+    
     pesos = {}
     
     prov_shape = prov_shape.buffer(0.00001) if not prov_shape.is_valid else prov_shape
@@ -49,10 +53,7 @@ def calcular_pesos_voronoi(gdf_estaciones, prov_shape):
         prov_projected = gpd.GeoSeries([prov_shape], crs="EPSG:4326").to_crs("EPSG:32617").iloc[0]
         estaciones_projected = gdf_estaciones.to_crs("EPSG:32617")
         
-        poly_shapes, pts_indices = voronoi_regions_from_coords(
-            estaciones_projected.geometry, 
-            prov_projected
-        )
+        poly_shapes, pts_indices = voronoi_regions_from_coords(estaciones_projected.geometry, prov_projected)
         
         area_total = prov_projected.area
         for i, poly in poly_shapes.items():
@@ -82,6 +83,7 @@ def calcular_pesos_voronoi(gdf_estaciones, prov_shape):
     return pesos
 
 def generar_pesos_maestro(df_clima, gjson='cuba.geojson'):
+    """Genera los pesos por estacion"""
     
     provincias_map, gdf_estaciones = cargar_datos(df_clima, gjson)
     provincias_map.loc[provincias_map['province'] == 'Guantanmo', 'province'] = 'Guantánamo'
