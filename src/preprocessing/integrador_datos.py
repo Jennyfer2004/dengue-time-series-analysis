@@ -1,14 +1,12 @@
 import pandas as pd
 import os 
 
-from calculando_voroni import generar_pesos_maestro
-from transformar_a_semanal import semanal 
+from src.preprocessing.calculando_voroni import generar_pesos_maestro
+from src.preprocessing.transformar_a_semanal import semanal 
 
-# ---  UTILIDADES DE LIMPIEZA ---
 def normalizar_nombre_provincia(nombre):
-    """
-    Normaliza el nombre de la provincia para hacer coincidir entre datasets
-    """
+    """Normaliza el nombre de la provincia para hacer coincidir entre datasets"""
+    
     if pd.isna(nombre):
         return nombre
     
@@ -27,25 +25,26 @@ def normalizar_nombre_provincia(nombre):
     
     return ' '.join([word.capitalize() for word in nombre.split()])
 
-# --- LÓGICA DE CARGA Y PROCESAMIENTO ---
 def load_data(ruta_clima,ruta_casos,ano):
+    """Leer los datos"""
+    
     df_clima = pd.read_csv(ruta_clima)
     df_clima = df_clima[df_clima['Año'] >= ano]
     df_dengue= pd.read_csv(ruta_casos)
     return df_clima,df_dengue
 
 
-def procesar_clima_provincial(df_clima, geojson_path):
-
-    pesos_maestro = generar_pesos_maestro(df_clima, gjson='cuba.geojson')
+def procesar_clima_provincial(df_clima, geojson_path): 
+    """Llama a las funciones que calculan los pesos por estacion"""
+    
+    pesos_maestro = generar_pesos_maestro(df_clima, geojson_path)
     
     variables = ['Temperatura med', 'Humedad Relat', 'Precipitaciones']
+    
     for var in variables:
         df_clima[f'{var}_ponderada'] = df_clima[var] * df_clima['Nombres Estaciones'].map(pesos_maestro)
 
-    df_prov = df_clima.groupby(['Provincias', 'Año', 'Mes'])[ 
-        [f'{v}_ponderada' for v in variables] 
-    ].sum().reset_index()
+    df_prov = df_clima.groupby(['Provincias', 'Año', 'Mes'])[[f'{v}_ponderada' for v in variables]].sum().reset_index()
     
     df_prov.columns = ['Provincias', 'Año', 'Mes', 'Temp_Med', 'Hum_Rel', 'Precip']
     
@@ -58,11 +57,8 @@ def procesar_clima_provincial(df_clima, geojson_path):
     })
     
 def procesar_casos(df):
-
-    df['Fecha'] = pd.to_datetime(
-        df['Año'].astype(str) + df['Semana Estadística'].astype(str) + '1', 
-        format='%Y%W%w'
-    )
+    """Preprocesamiento"""
+    df['Fecha'] = pd.to_datetime(df['Año'].astype(str) + df['Semana Estadística'].astype(str) + '1', format='%Y%W%w')
     
     id_vars = ['Año', 'Semana Estadística', 'Fecha']
     value_vars = [col for col in df.columns if col not in id_vars and col != 'Unnamed: 0']
@@ -73,8 +69,9 @@ def procesar_casos(df):
     df_largo['Provincias'] = df_largo['Provincias'].apply(normalizar_nombre_provincia)
     return df_largo
 
-# --- INTEGRACIÓN Y SALIDA ---
 def exportar_por_provincias(df_final, carpeta='dataframes_provincias'):
+    "Preprocesamiento por provinicas"
+    
     os.makedirs(carpeta, exist_ok=True)
     for provincia in df_final['Provincias'].unique():
         df_prov = df_final[df_final['Provincias'] == provincia].dropna()
@@ -82,18 +79,18 @@ def exportar_por_provincias(df_final, carpeta='dataframes_provincias'):
             ruta = os.path.join(carpeta, f'{provincia.replace(" ", "_")}.csv')
             df_prov.to_csv(ruta, index=False)
             
-def ejecutar_preprocessing(ruta_clima, ruta_casos, ano_inicial=2014,ano_corte=2022):
-
+def ejecutar_preprocessing(ruta_clima, ruta_casos,geojson_path, ano_inicial=2014,ano_corte=2022):
+    """Funcion principal"""
+    
     raw_clima, raw_casos = load_data(ruta_clima, ruta_casos, ano_inicial)
     
-    df_clima_ready = procesar_clima_provincial(raw_clima, 'cuba.geojson')
+    df_clima_ready = procesar_clima_provincial(raw_clima,geojson_path)
     df_casos_ready = procesar_casos(raw_casos)
     
     df_completo = pd.merge(df_casos_ready, df_clima_ready, on=['Fecha', 'Provincias',"Año"], how='left')
     
     df_historico = df_completo[df_completo["Año"] <= ano_corte].copy()
     
-    # 5. Exportar
     exportar_por_provincias(df_historico)
     
     return df_historico
