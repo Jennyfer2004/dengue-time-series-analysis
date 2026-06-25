@@ -189,6 +189,11 @@ def ejecutar_dl_rolling(df, n_test_weeks,nombre_provincia, horizonte, arch_type,
     """Rolling DL con LSTM"""
     
     n_past = params['n_past']
+    u1 = params.get('best_lstm_u1', 64)
+    u2 = params.get('best_lstm_u2', 32)
+    dropout = params.get('best_dropout', 0.2)
+    dense_u = params.get('best_dense_u', 32)
+    
     todas_predicciones = []
     inicio_test = len(df) - n_test_weeks
 
@@ -211,7 +216,14 @@ def ejecutar_dl_rolling(df, n_test_weeks,nombre_provincia, horizonte, arch_type,
         X_train = crear_secuencias_3d(train_scaled, n_past)
         y_train = train_scaled[n_past:, target_idx]
 
-        model = build_lstm_model(arch_type, (X_train.shape[1], X_train.shape[2]))
+        model = build_lstm_model(
+                    model_type=arch_type, 
+                    input_shape=(X_train.shape[1], X_train.shape[2]),
+                    lstm_u1=u1,
+                    lstm_u2=u2,
+                    dropout_rate=dropout,
+                    dense_u=dense_u
+                )
         total_params = model.count_params()
         n_lstm_layers = 0
         n_dense_layers = 0
@@ -246,6 +258,9 @@ def ejecutar_dl_rolling(df, n_test_weeks,nombre_provincia, horizonte, arch_type,
             extra_info={"Parametros_Entrenables": total_params,"Capas_LSTM": n_lstm_layers,"Capas_Densas": n_dense_layers,"Neuronas_LSTM": str(lstm_units),"Neuronas_Densas": str(dense_units),"Attention_Size": attention_size})
             
         early_stop = tf.keras.callbacks.EarlyStopping(monitor='loss', patience=10, restore_best_weights=True )
+        lr_actual = params.get('best_lr', 0.001)  # Toma 'best_lr' si existe, si no, usa 0.001
+
+        model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=lr_actual),loss='mse')
         model.fit(X_train, y_train, epochs=params.get('epochs', 50), batch_size=params.get('batch_size', 32), verbose=0, callbacks=[early_stop])
 
         last_sequence = train_scaled[-n_past:].copy()
