@@ -23,8 +23,6 @@ def main():
     
     print("\n[FASE 2] Iniciando optimización masiva de hiperparámetros (Tuning)...")
     for prov in PROVINCIAS:
-        if prov !="La Habana":
-            continue
         print(f" Optimizando backend para: {prov}")
         
         # SARIMA/X
