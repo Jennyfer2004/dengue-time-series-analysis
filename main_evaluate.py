@@ -50,26 +50,26 @@ def ejecutar_experimento_global():
         )
                 
         # # Modelos de Machine Learning
-        # main_proceso_ml_provincia(
-        #     nombre_provincia=provincia,
-        #     carpeta_in=CARPETA_DATOS + "/casos_acf",
-        #     ruta_params=RUTA_PARAMS,
-        #     ruta_salida=RUTA_REPORTE_FINAL,
-        #     modelos_a_evaluar=["SVR", "RandomForest", "XGBoost"],
-        #     n_test_weeks=49,
-        #     semanas=4
-        # )
+        main_proceso_ml_provincia(
+            nombre_provincia=provincia,
+            carpeta_in=CARPETA_DATOS + "/casos_acf",
+            ruta_params=RUTA_PARAMS,
+            ruta_salida=RUTA_REPORTE_FINAL,
+            modelos_a_evaluar=["SVR", "RandomForest", "XGBoost"],
+            n_test_weeks=49,
+            semanas=4
+        )
         
         # Modelos de Deep Learning
-        # main_proceso_dl_provincia(
-        #     nombre_provincia=provincia,
-        #     carpeta=CARPETA_DATOS + "/clima_lags",
-        #     ruta_parametros=RUTA_PARAMS,
-        #     ruta_salida_excel=RUTA_REPORTE_FINAL,
-        #     modelo_dl=["stacked", "bidirectional", "attention"],
-        #     n_test_weeks=49,
-        #     horizonte=4
-        # )
+        main_proceso_dl_provincia(
+            nombre_provincia=provincia,
+            carpeta=CARPETA_DATOS + "/clima_lags",
+            ruta_parametros=RUTA_PARAMS,
+            ruta_salida_excel=RUTA_REPORTE_FINAL,
+            modelo_dl=["stacked", "bidirectional", "attention"],
+            n_test_weeks=49,
+            horizonte=4
+        )
         
         ejecutar_analisis_parsimonia_completo(
             ruta_predicciones=RUTA_REPORTE_FINAL_PREDICCIONES, 
