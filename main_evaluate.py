@@ -23,8 +23,6 @@ RUTA_COMPLEJIDAD = "outputs/tables/complejidad_modelos.csv"
 def ejecutar_experimento_global():
     print("======  INICIANDO EVALUACIÓN GLOBAL DE MODELOS DE TESIS ======\n")
     for provincia in PROVINCIAS:
-        if provincia!="La Habana":
-            continue
         print(f" PROCESANDO PROVINCIA: {provincia}")
     
         # Modelo SARIMA
